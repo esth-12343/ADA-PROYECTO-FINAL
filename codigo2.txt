@@ -1,0 +1,305 @@
+
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+
+ruta_zip = '/content/drive/MyDrive/EDA/10_million_location.txt.zip'
+ruta_usuarios = '/content/drive/MyDrive/EDA/10_million_user.txt.zip'
+
+
+
+
+import zipfile
+from tqdm import tqdm
+
+# Descomprimir y cargar ubicaciones
+def cargar_ubicaciones(ruta_zip):
+    try:
+        with zipfile.ZipFile(ruta_zip) as z:
+            with z.open(z.namelist()[0]) as f:
+                coords = [tuple(map(float, line.decode().strip().split(','))) for line in tqdm(f)]
+        return coords
+    except zipfile.BadZipFile:
+        print(f"El archivo zip está corrupto: {ruta_zip}")
+        return []
+    except Exception as e:
+        print(f"Error cargando ubicaciones: {e}")
+        return []
+
+# Descomprimir y cargar lista de adyacencia
+def cargar_usuarios(ruta_zip):
+    try:
+        with zipfile.ZipFile(ruta_zip) as z:
+            with z.open(z.namelist()[0]) as f:
+                adyacencia = [list(map(int, line.decode().strip().split(','))) for line in tqdm(f)]
+        return adyacencia
+    except zipfile.BadZipFile:
+        print(f"El archivo zip está corrupto: {ruta_zip}")
+        return []
+    except Exception as e:
+        print(f"Error cargando usuarios: {e}")
+        return []
+
+
+
+import os
+
+# Definir las rutas
+ruta_zip = '/content/drive/MyDrive/EDA/10_million_location.txt.zip'
+ruta_usuarios = '/content/drive/MyDrive/EDA/10_million_user.txt.zip'
+
+# Comprobar si ambos archivos existen
+for ruta in [ruta_zip, ruta_usuarios]:
+    if os.path.exists(ruta):
+        print(f"Archivo encontrado en: {ruta}")
+    else:
+        print(f"Archivo no encontrado en: {ruta}")
+
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def visualizar_grado(G, sample_size=100000):
+    grados = [d for _, d in G.degree()]
+    muestra = np.random.choice(grados, size=min(sample_size, len(grados)), replace=False)
+    sns.histplot(muestra, bins=100, kde=True)
+    plt.title("Distribución de Grado del Grafo")
+    plt.xlabel("Grado")
+    plt.ylabel("Frecuencia")
+    plt.show()
+
+def visualizar_grafo(G, num_nodos=50):
+    sub = G.subgraph(list(G.nodes())[:num_nodos])  # solo un subgrafo por visualización
+    plt.figure(figsize=(12, 8))
+    nx.draw(sub, with_labels=True, node_size=100, node_color='lightblue', edge_color='gray')
+    plt.title(f"Subgrafo de los primeros {num_nodos} nodos")
+    plt.show()
+
+# 🔍 Mostrar visualizaciones
+visualizar_grado(G)
+visualizar_grafo(G)
+
+
+from scipy.sparse import csr_matrix
+import networkx as nx
+
+def construir_grafo_eficiente(adyacencia):
+    # Convertir la lista de adyacencia en una matriz dispersa
+    row = []
+    col = []
+    for i, vecinos in enumerate(adyacencia, start=1):
+        row.extend([i] * len(vecinos))
+        col.extend(vecinos)
+    data = [1] * len(row)
+    grafo_sparse = csr_matrix((data, (row, col)), shape=(len(adyacencia)+1, len(adyacencia)+1))
+    G = nx.from_scipy_sparse_matrix(grafo_sparse)
+    return G
+
+
+import seaborn as sns
+
+def visualizar_grado(G, sample_size=100000):
+    grados = [d for n, d in G.degree()]
+    sample = np.random.choice(grados, size=sample_size)
+    sns.histplot(sample, bins=100, kde=True)
+    plt.title("Distribución de grado")
+    plt.xlabel("Grado")
+    plt.ylabel("Frecuencia")
+    plt.show()
+
+
+
+**EDA y Estadísticas**
+
+def estadisticas_basicas_eficiente(G, sample_size=10000):
+    grados = [d for n, d in G.degree()]
+    sample = np.random.choice(grados, size=sample_size)
+    print(f"Grado promedio (muestra): {np.mean(sample):.2f}")
+
+
+
+
+!pip install python-louvain
+
+import community as community_louvain
+
+def detectar_comunidades(G):
+    print("Detectando comunidades...")
+    undirected_G = G.to_undirected()
+    partition = community_louvain.best_partition(undirected_G)
+    print(f"Número de comunidades detectadas: {len(set(partition.values()))}")
+    return partition
+
+
+
+
+def camino_mas_corto(G, muestra=1000):
+    nodos = list(G.nodes())
+    seleccion = np.random.choice(nodos, size=muestra)
+    total = 0
+    count = 0
+    for nodo in tqdm(seleccion):
+        try:
+            lengths = nx.single_source_shortest_path_length(G, nodo)
+            total += sum(lengths.values())
+            count += len(lengths)
+        except:
+            continue
+    promedio = total / count
+    print(f"Longitud promedio del camino más corto (estimado): {promedio:.2f}")
+
+
+lengths = dict(nx.all_pairs_shortest_path_length(subgraph))
+all_lengths = [l for target in lengths.values() for l in target.values()]
+plt.hist(all_lengths, bins=30)
+plt.title("Distribución de caminos más cortos (subgrafo)")
+plt.xlabel("Longitud del camino")
+plt.ylabel("Frecuencia")
+plt.show()
+
+
+def arbol_expansion_minima(G):
+    G_u = G.to_undirected()
+    componentes = list(nx.connected_components(G_u))
+    sub = G_u.subgraph(componentes[0])
+    mst = nx.minimum_spanning_tree(sub)
+    print(f"MST tiene {mst.number_of_edges()} aristas.")
+    return mst
+
+
+
+
+import plotly.graph_objs as go
+
+def visualizar_comunidades_plotly_eficiente(G, partition, sample_size=500):
+    sample_nodes = list(np.random.choice(G.nodes(), size=sample_size))
+    pos = nx.spring_layout(G.subgraph(sample_nodes))  # Layout para un subgrafo
+    edge_trace = go.Scatter(
+        x=[], y=[], line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines'
+    )
+    for edge in G.subgraph(sample_nodes).edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_trace['x'] += [x0, x1, None]
+        edge_trace['y'] += [y0, y1, None]
+    node_trace = go.Scatter(
+        x=[], y=[], mode='markers', hoverinfo='text', marker=dict(showscale=True)
+    )
+    for node in G.subgraph(sample_nodes).nodes():
+        x, y = pos[node]
+        node_trace['x'] += (x,)
+        node_trace['y'] += (y,)
+    fig = go.Figure(data=[edge_trace, node_trace],
+                    layout=go.Layout(title="Red Social con comunidades detectadas", showlegend=False))
+    fig.show()
+
+
+import plotly.graph_objs as go
+from plotly.subplots import make_subplots
+
+
+import networkx as nx
+import matplotlib.pyplot as plt
+
+# Usa un subconjunto pequeño para que se pueda graficar
+subgraph = nx.erdos_renyi_graph(1000, 0.1)
+
+plt.figure(figsize=(8,6))
+nx.draw(subgraph, node_size=30, node_color='orange', with_labels=False)
+plt.title('Subgrafo de la red social')
+plt.show()
+
+
+
+
+def crear_mapa(coords, zoom_start=2):
+    # Usamos solo los primeros 5000 para evitar que se congele el navegador
+    muestra = coords[:5000]
+    centro = [sum([c[0] for c in muestra]) / len(muestra), sum([c[1] for c in muestra]) / len(muestra)]
+
+    mapa = folium.Map(location=centro, zoom_start=zoom_start)
+    for lat, lon in muestra:
+        folium.CircleMarker([lat, lon], radius=1, color='blue', fill=True).add_to(mapa)
+    return mapa
+
+# EJECUCIÓN
+ruta_zip = "/content/drive/MyDrive/EDA/10_million_location.txt.zip"
+coords = cargar_ubicaciones(ruta_zip)
+mapa = crear_mapa(coords)
+
+# VISUALIZAR EN COLAB (SIN GUARDARLO COMO ARCHIVO)
+display(mapa)
+
+
+
+def visualizar_comunidades_colores(G, partition):
+    colors = list(partition.values())
+    plt.figure(figsize=(10, 7))
+    nx.draw(G, node_color=colors, cmap=plt.cm.tab20, node_size=50, with_labels=False)
+    plt.title("Comunidades detectadas en el grafo")
+    plt.show()
+
+
+
+
+import plotly.graph_objs as go
+import networkx as nx
+import numpy as np
+
+# Función de visualización
+def visualizar_comunidades_plotly(G, partition, sample_size=1000):
+    # Determinar un tamaño de muestra adecuado y seleccionar nodos
+    sample_nodes = list(np.random.choice(G.nodes(), size=min(sample_size, len(G.nodes())), replace=False))
+
+    # Obtener la disposición de los nodos del subgrafo
+    pos = nx.spring_layout(G.subgraph(sample_nodes), seed=42)  # Fijar seed para reproducibilidad
+
+    # Inicializar el trazo de las aristas
+    edge_trace = go.Scatter(
+        x=[], y=[], line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines'
+    )
+
+    # Añadir las aristas al trazo
+    for edge in G.subgraph(sample_nodes).edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_trace['x'] += (x0, x1, None)
+        edge_trace['y'] += (y0, y1, None)
+
+    # Inicializar el trazo de los nodos
+    node_trace = go.Scatter(
+        x=[], y=[], text=[], mode='markers', hoverinfo='text',
+        marker=dict(showscale=True, colorscale='Viridis', size=5, color=[], colorbar=dict(thickness=15))
+    )
+
+    # Añadir los nodos al trazo
+    for node in sample_nodes:
+        x, y = pos[node]
+        node_trace['x'] += (x,)
+        node_trace['y'] += (y,)
+        node_trace['marker']['color'] += (partition[node],)
+        node_trace['text'] += (f"Usuario {node}",)
+
+    # Crear la figura y mostrarla
+    fig = go.Figure(data=[edge_trace, node_trace],
+                    layout=go.Layout(title='Red con Comunidades',
+                                     showlegend=False,
+                                     hovermode='closest'))
+    fig.show()
+
+# Crear un grafo de ejemplo con una submuestra más grande
+G = nx.erdos_renyi_graph(100000, 0.00001)  # Grafo de tamaño más manejable
+
+# Crear una partición aleatoria (asignar comunidades aleatorias)
+partition = {node: np.random.choice([0, 1, 2, 3, 4]) for node in G.nodes()}
+
+# Llamar a la función de visualización con un tamaño de muestra representativa
+visualizar_comunidades_plotly(G, partition, sample_size=1000)
+
+
+mst = nx.minimum_spanning_tree(subgraph.to_undirected())
+plt.figure(figsize=(10,6))
+nx.draw(mst, node_size=30, edge_color='gray')
+plt.title("Árbol de expansión mínima")
+plt.show()

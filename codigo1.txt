@@ -1,0 +1,398 @@
+
+
+import zipfile
+import networkx as nx
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+import os
+
+# Para que los gráficos se muestren en el notebook
+%matplotlib inline
+
+
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+
+
+
+import os
+
+ruta_ubicaciones = '/content/drive/MyDrive/EDA/10_million_location.txt.zip'
+ruta_usuarios = '/content/drive/MyDrive/EDA/10_million_user.txt.zip'
+
+for ruta in [ruta_ubicaciones, ruta_usuarios]:
+    print(f"{'Se encontro' if os.path.exists(ruta) else 'No encontrado'}: {ruta}")
+
+
+
+#  CARGA SOLO UNA MUESTRA PEQUEÑA DEL GRAFO
+
+
+def construir_grafo_desde_zip(ruta_zip, max_nodos=1000):
+    G = nx.Graph()
+    try:
+        with zipfile.ZipFile(ruta_zip) as z:
+            with z.open(z.namelist()[0]) as f:
+                for i, line in enumerate(tqdm(f, desc="Construyendo subgrafo")):
+                    if i >= max_nodos:
+                        break
+                    vecinos = list(map(int, line.decode().strip().split(',')))
+                    #Agregamos las aristas al grafo
+                    for v in vecinos:
+                        if v < max_nodos:
+                            G.add_edge(i, v)
+        return G
+    # Manejo de errores
+    except Exception as e:
+        print(f"Error al construir el grafo: {e}")
+        return nx.Graph()
+
+
+
+#  FUNCIÓN DE VISUALIZACIÓN DE SUBGRAFO
+
+def visualizar_grafo(G, num_nodos=100):
+    sub = G.subgraph(list(G.nodes)[:num_nodos]) #subgrafo
+
+    plt.figure(figsize=(10, 8))
+    pos = nx.spring_layout(sub, seed=42)
+    nx.draw(sub, pos, node_size=40, node_color='skyblue', with_labels=False)
+    plt.title(f"Visualización de subgrafo ({num_nodos} nodos)")
+    plt.show()
+
+# CARGAR Y MOSTRAR UN SUBGRAFO LIGERO
+G = construir_grafo_desde_zip(ruta_usuarios, max_nodos=1000)
+print(f"Número de nodos: {G.number_of_nodes()}")
+print(f"Número de aristas: {G.number_of_edges()}")
+
+visualizar_grafo(G, num_nodos=30)
+
+gc.collect()  # Liberar memoria
+
+# NO LO MODIFIQUE
+
+import zipfile
+from tqdm import tqdm
+
+# Descomprimir y cargar ubicaciones
+def cargar_ubicaciones(ruta_zip):
+    try:
+        with zipfile.ZipFile(ruta_zip) as z:
+            with z.open(z.namelist()[0]) as f:
+                coords = [tuple(map(float, line.decode().strip().split(','))) for line in tqdm(f)]
+        return coords
+    except zipfile.BadZipFile:
+        print(f"El archivo zip está corrupto: {ruta_zip}")
+        return []
+    except Exception as e:
+        print(f"Error cargando ubicaciones: {e}")
+        return []
+
+# Descomprimir y cargar lista de adyacencia
+def cargar_usuarios(ruta_zip):
+    try:
+        with zipfile.ZipFile(ruta_zip) as z:
+            with z.open(z.namelist()[0]) as f:
+                adyacencia = [list(map(int, line.decode().strip().split(','))) for line in tqdm(f)]
+        return adyacencia
+    except zipfile.BadZipFile:
+        print(f"El archivo zip está corrupto: {ruta_zip}")
+        return []
+    except Exception as e:
+        print(f"Error cargando usuarios: {e}")
+        return []
+
+
+# Cargar usuarios y construir el grafo
+adyacencia = cargar_usuarios(ruta_usuarios)
+G = construir_grafo_eficiente(adyacencia)
+
+
+
+Estadísticas básicas
+
+def estadisticas_basicas(G):
+    print(" Estadísticas del Grafo ")
+    print(f" Número de nodos : {G.number_of_nodes()}")
+    print(f" Número de aristas : {G.number_of_edges()}")
+    grados = [d for _, d in G.degree()]
+    print(f" Grado promedio : {sum(grados) / len(grados):.2f}")
+    G = construir_grafo_desde_zip(ruta_usuarios, max_nodos=1000)
+estadisticas_basicas(G)
+
+
+Visualización: Grado y Subgrafo
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+def visualizar_grado(G, sample_size=100_000):
+    grados = [d for _, d in G.degree()]
+    muestra = np.random.choice(grados, size=min(sample_size, len(grados)), replace=False)
+    sns.histplot(muestra, bins=100, kde=True)
+    plt.title("Distribución del Grado de los Nodos")
+    plt.xlabel("Grado")
+    plt.ylabel("Frecuencia")
+    plt.show()
+
+def visualizar_subgrafo(G, num_nodos=50):
+    sub = G.subgraph(list(G.nodes())[:num_nodos])
+    plt.figure(figsize=(12, 8))
+    nx.draw(sub, with_labels=True, node_size=100, node_color='lightblue')
+    plt.title("Subgrafo de los primeros nodos")
+    plt.show()
+
+
+
+
+Detección de comunidades
+
+import community as community_louvain
+
+def detectar_comunidades_louvain(G):
+    undirected_G = G.to_undirected()
+    particion = community_louvain.best_partition(undirected_G)
+    print(f"Número de comunidades detectadas: {len(set(particion.values()))}")
+    return particion
+
+
+
+def camino_mas_corto_promedio(G, sample_size=1000):
+    nodos = list(G.nodes())
+    muestra = np.random.choice(nodos, size=sample_size, replace=False)
+    longitudes = []
+    for nodo in muestra:
+        try:
+            caminos = nx.single_source_shortest_path_length(G, nodo)
+            longitudes.extend(caminos.values())
+        except:
+            continue
+    promedio = sum(longitudes) / len(longitudes)
+    print(f"Longitud promedio del camino más corto: {promedio:.2f}")
+
+
+
+
+def arbol_expansion_minima(G):
+    G_undirected = G.to_undirected()
+    arbol = nx.minimum_spanning_tree(G_undirected)
+    print(f"Aristas en el árbol de expansión mínima: {arbol.number_of_edges()}")
+    return arbol
+
+
+
+particion = detectar_comunidades_louvain(G)
+
+def visualizar_detectar_comunidades_louvain(G, particion, num_nodos=200):
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+
+    plt.figure(figsize=(14, 10))
+    sub = G.subgraph(list(particion.keys())[:num_nodos])
+    colores = [particion[nodo] for nodo in sub.nodes()]
+    pos = nx.spring_layout(sub, seed=42)
+    cmap = cm.get_cmap('viridis', max(particion.values()) + 1)
+    nx.draw(sub, pos, node_color=colores, node_size=80, cmap=cmap, with_labels=False)
+    plt.title("Visualización de Comunidades (Subgrafo)")
+    plt.show()
+
+visualizar_detectar_comunidades_louvain(G, particion)
+
+
+Camino más corto promedio
+
+camino_mas_corto_promedio(G)
+
+
+árbol de expansión mínima
+
+arbol = arbol_expansion_minima(G)
+
+plt.figure(figsize=(12, 8))
+pos = nx.spring_layout(arbol, seed=42)
+nx.draw(arbol.subgraph(list(arbol.nodes())[:100]), pos, node_size=40, node_color='orange', with_labels=False)
+plt.title("Árbol de Expansión Mínima (Subgrafo de 100 nodos)")
+plt.show()
+
+
+geográficamente los usuarios (si tienes coordenadas)
+
+# Cargar las ubicaciones
+coords = cargar_ubicaciones(ruta_ubicaciones)
+
+if coords:
+    print(f"Se cargaron {len(coords)} ubicaciones.")
+else:
+    print("No se pudieron cargar las ubicaciones.")
+
+
+def visualizar_ubicaciones(coords):
+    plt.figure(figsize=(10, 8))
+    x, y = zip(*coords)
+    plt.scatter(x, y, s=1, color='blue', alpha=0.5)
+    plt.title(f"Visualización de Ubicaciones ({len(coords)} puntos)")
+    plt.show()
+
+# Ahora puedes visualizar
+if coords:
+    visualizar_ubicaciones(coords)
+
+
+#  Estadísticas básicas del grafo
+def estadisticas_basicas(G):
+    print(" Estadísticas del Grafo")
+    print(f" Número de nodos: {G.number_of_nodes()}")
+    print(f" Número de aristas: {G.number_of_edges()}")
+    grados = [deg for _, deg in G.degree()]
+    print(f" Grado promedio: {sum(grados)/len(grados):.2f}")
+    print(f" Grado máximo: {max(grados)}")
+    print(f" Grado mínimo: {min(grados)}")
+
+estadisticas_basicas(G)
+
+
+## Top de usuarios más conectados (nodos con mayor grado)
+
+# MODIQUE PAR AMAYOR PRESICION DE LOS  DATSO DE LOS USUARIOS   CONECTADOS
+# AUN  HAY PRBEMAS POR CORREGIR
+import pandas as pd
+import networkx as nx
+import matplotlib.pyplot as plt
+
+def top_usuarios_conectados(G, top_n=10):
+    print(f"\n📊 Top {top_n} usuarios más conectados")
+
+    # Grado de cada nodo (número de conexiones)
+    grados = dict(G.degree())
+
+    # Calcular centralidad de intermediación (opcional, pero útil)
+    centralidad_intermediacion = nx.betweenness_centrality(G)
+    centralidad_cercania = nx.closeness_centrality(G)
+    pagerank = nx.pagerank(G)
+
+    # Juntar toda la info en una lista de tuplas
+    usuarios_info = []
+    for nodo in G.nodes():
+        usuarios_info.append({
+            'usuario': nodo,
+            'grado': grados[nodo],
+            'vecinos': list(G.neighbors(nodo)),
+            'grado_normalizado': grados[nodo] / (len(G.nodes()) - 1),
+            'betweenness': centralidad_intermediacion[nodo],
+            'closeness': centralidad_cercania[nodo],
+            'pagerank': pagerank[nodo]
+        })
+
+    # Convertir a DataFrame
+    df = pd.DataFrame(usuarios_info)
+
+    # Ordenar por grado y tomar el top_n
+    df_top = df.sort_values(by='grado', ascending=False).head(top_n)
+
+    # Imprimir información detallada
+    for _, row in df_top.iterrows():
+        print(f"👤 Usuario {row['usuario']} - {row['grado']} conexiones")
+        print(f"   Vecinos: {row['vecinos']}")
+        print(f"   Grado normalizado: {row['grado_normalizado']:.3f}")
+        print(f"   Centralidad (Betweenness): {row['betweenness']:.4f}")
+        print(f"   Centralidad (Closeness): {row['closeness']:.4f}")
+        print(f"   PageRank: {row['pagerank']:.4f}")
+        print("")
+
+    # Graficar resultados
+    cmap = plt.get_cmap('viridis')
+    colores = [cmap(i / top_n) for i in range(top_n)]
+
+    plt.figure(figsize=(10, 6))
+    plt.bar(df_top['usuario'].astype(str), df_top['grado'], color=colores, edgecolor='black')
+    plt.xlabel("ID de Usuario")
+    plt.ylabel("Número de Conexiones")
+    plt.title(f"Top {top_n} Usuarios Más Conectados")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+    return df_top
+
+
+df_top = top_usuarios_conectados(G, top_n=10)
+
+# Para ver el DataFrame completo
+print(df_top)
+
+# O, si estás en un entorno interactivo como Jupyter:
+df_top
+
+
+## Densidad Geográfica
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+def visualizar_densidad_geografica(coords, bins=300):
+    # Separar coordenadas
+    x, y = zip(*coords)
+
+    # Crear el heatmap
+    plt.figure(figsize=(12, 10))
+    heatmap, xedges, yedges = np.histogram2d(x, y, bins=bins)
+    heatmap = heatmap.T  # Transponer para que esté orientado correctamente
+
+    plt.imshow(
+        heatmap,
+        extent=[min(x), max(x), min(y), max(y)],
+        origin='lower',
+        cmap='hot',
+        interpolation='nearest',
+        aspect='auto'
+    )
+    plt.colorbar(label='Densidad de usuarios')
+    plt.title(f"Densidad Geográfica de Usuarios - {bins}x{bins} celdas")
+    plt.xlabel("Longitud")
+    plt.ylabel("Latitud")
+    plt.show()
+
+
+visualizar_densidad_geografica(coords, bins=300)
+
+
+import matplotlib.pyplot as plt
+import networkx as nx
+import random
+
+# Definir un grafo vacío
+G = nx.Graph()
+
+# Agregar nodos al grafo (ejemplo con 10 nodos)
+for i in range(10):
+    G.add_node(i)
+
+# Lista de países con coordenadas aproximadas
+paises = [
+    {"pais": "Perú", "lat": -9.19, "lon": -75.0152},
+    {"pais": "México", "lat": 23.6345, "lon": -102.5528},
+    {"pais": "Argentina", "lat": -38.4161, "lon": -63.6167},
+    # más países si es necesario...
+]
+
+# Asignar coordenadas aleatorias a los nodos
+for node in G.nodes:
+    lugar = random.choice(paises)  # Elegir un país aleatorio
+    G.nodes[node]['lat'] = lugar['lat'] + random.uniform(-1, 1)  # Variar coordenada latitudinal
+    G.nodes[node]['lon'] = lugar['lon'] + random.uniform(-1, 1)  # Variar coordenada longitudinal
+
+# Visualizar las coordenadas de los nodos
+lats = [G.nodes[node]['lat'] for node in G.nodes]
+lons = [G.nodes[node]['lon'] for node in G.nodes]
+
+plt.scatter(lons, lats, c='red', label="Usuarios")  # Poner los puntos de los nodos
+plt.xlabel('Longitud')
+plt.ylabel('Latitud')
+plt.title('Mapa de Usuarios')
+
+# Mostrar el mapa
+plt.show()
+
