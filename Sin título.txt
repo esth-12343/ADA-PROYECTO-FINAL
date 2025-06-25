@@ -1,0 +1,686 @@
+
+from google.colab import drive
+drive.mount('/content/drive')
+
+import os
+ruta_ubicaciones = '/content/drive/MyDrive/EDA/10_million_location.txt.zip'
+ruta_usuarios = '/content/drive/MyDrive/EDA/10_million_user.txt.zip'
+for ruta in [ruta_ubicaciones, ruta_usuarios]:
+    print(f"{'Se encontró exitosamente ' if os.path.exists(ruta) else 'No encontrado'}: {ruta}")
+
+
+
+
+import zipfile
+from tqdm import tqdm
+
+def cargar_usuarios(ruta_zip, max_nodos=1000):
+    adyacencia = {}
+    with zipfile.ZipFile(ruta_zip) as z:
+        with z.open(z.namelist()[0]) as f:
+            for i, line in enumerate(tqdm(f)):
+                if i >= max_nodos:
+                    break
+                vecinos = list(map(int, line.decode().strip().split(',')))
+                adyacencia[i] = set([v for v in vecinos if v < max_nodos and v != i])
+    return adyacencia
+
+def cargar_ubicaciones(ruta_zip):
+    with zipfile.ZipFile(ruta_zip) as z:
+        with z.open(z.namelist()[0]) as f:
+            coords = [tuple(map(float, line.decode().strip().split(','))) for line in tqdm(f)]
+    return coords
+
+adyacencia = cargar_usuarios(ruta_usuarios, max_nodos=1000)
+
+
+
+def preprocesamiento(adyacencia):
+    print(" Procesando de Datos : ")
+    nodos_sin_conexion = [n for n, vecinos in adyacencia.items() if not vecinos]
+    print(f" Usuarios sin conexiones : {len(nodos_sin_conexion)}")
+    if nodos_sin_conexion:
+        # print(f" Algunos : {nodos_sin_conexion[:5]}")
+        print(f" Lista  de nodos sin conexión: {nodos_sin_conexion}")
+
+
+    nodos_duplicados = len(adyacencia) != len(set(adyacencia))
+    print(f" Nodos duplicados detectados: {'si' if nodos_duplicados else 'no'}")
+
+
+preprocesamiento(adyacencia)
+
+
+
+
+def construir_grafo_desde_adyacencia(adyacencia):
+    edges = set()
+    for u in adyacencia:
+        for v in adyacencia[u]:
+            edges.add(tuple(sorted((u, v))))
+    return {'nodes': list(adyacencia.keys()), 'adj': adyacencia, 'edges': list(edges)}
+
+G_manual = construir_grafo_desde_adyacencia(adyacencia)
+
+
+# 📊 4. ESTADÍSTICAS BÁSICAS DEL GRAFO
+def estadisticas_basicas_mejoradas(G):
+    grados = [len(G['adj'][n]) for n in G['nodes']]
+    num_nodos = len(G['nodes'])
+    num_aristas = len(G['edges'])
+    grado_promedio = sum(grados) / num_nodos
+    grado_max = max(grados)
+    grado_min = min(grados)
+
+    print("📊 ESTADÍSTICAS BÁSICAS DEL GRAFO")
+    print("="*40)
+    print(f"{'🔢 Número de nodos':<25}: {num_nodos}")
+    print(f"{'🔗 Número de aristas':<25}: {num_aristas}")
+    print(f"{'📈 Grado promedio':<25}: {grado_promedio:.2f}")
+    print(f"{'🔺 Grado máximo':<25}: {grado_max}")
+    print(f"{'🔻 Grado mínimo':<25}: {grado_min}")
+    print("="*40)
+
+    # Frecuencia de grados
+    print("\n📊 Frecuencia de grados:")
+    frecuencia = {}
+    for g in grados:
+        frecuencia[g] = frecuencia.get(g, 0) + 1
+
+    for grado in sorted(frecuencia.keys()):
+        barra = '▇' * min(frecuencia[grado] // 2, 50)
+        print(f" Grado {grado:>2}: {frecuencia[grado]:>4} | {barra}")
+
+    print("\n📡 Vista rápida del grafo (primeros 5 nodos):")
+    print("="*40)
+    for nodo in G['nodes'][:5]:
+        vecinos = list(G['adj'][nodo])
+        print(f" Nodo {nodo:<3} → {vecinos[:5]}{' ...' if len(vecinos) > 5 else ''}")
+
+
+# Llamamos a la función con tu grafo
+estadisticas_basicas_mejoradas(G_manual)
+
+# 🎯 Algoritmo Girvan-Newman con estilo y claridad
+def girvan_newman(G):
+    """
+    Detecta comunidades en un grafo utilizando el algoritmo Girvan-Newman,
+    sin librerías externas. Muestra mensajes estéticos y explicativos.
+    """
+
+    def edge_betweenness(G):
+        """
+        Calcula la centralidad de intermediación para cada arista.
+        """
+        print("⏳ Calculando centralidad de intermediación (edge betweenness)...")
+        bet = {e: 0 for e in G['edges']}
+        for s in G['nodes']:
+            queue, visited = [s], {s}
+            paths = {s: [[s]]}
+            while queue:
+                current = queue.pop(0)
+                for neighbor in G['adj'][current]:
+                    if neighbor not in visited:
+                        visited.add(neighbor)
+                        queue.append(neighbor)
+                        paths[neighbor] = [p + [neighbor] for p in paths[current]]
+                    elif neighbor in paths:
+                        paths[neighbor].extend([p + [neighbor] for p in paths[current]])
+            for target in paths:
+                for path in paths[target]:
+                    for i in range(len(path) - 1):
+                        e = tuple(sorted((path[i], path[i + 1])))
+                        if e in bet:
+                            bet[e] += 1
+        return bet
+
+    # Copiar el grafo original para modificarlo
+    import copy
+    G_copy = {
+        'nodes': list(G['nodes']),
+        'adj': {n: set(neighs) for n, neighs in G['adj'].items()},
+        'edges': list(G['edges'])
+    }
+
+    components = []
+
+    iteracion = 1
+    while True:
+        print(f"\n📉 Iteración {iteracion}: Buscando arista con mayor carga...")
+        bet = edge_betweenness(G_copy)
+        if not bet:
+            print("🚫 No quedan aristas. El grafo está desconectado.")
+            break
+
+        edge_max = max(bet, key=bet.get)
+        print(f"🔻 Eliminando arista más cargada: {edge_max} con carga {bet[edge_max]}")
+
+        # Eliminación segura de la arista
+        if edge_max[1] in G_copy['adj'].get(edge_max[0], set()):
+            G_copy['adj'][edge_max[0]].remove(edge_max[1])
+        if edge_max[0] in G_copy['adj'].get(edge_max[1], set()):
+            G_copy['adj'][edge_max[1]].remove(edge_max[0])
+        if edge_max in G_copy['edges']:
+            G_copy['edges'].remove(edge_max)
+
+        # Buscar componentes conectadas (comunidades)
+        visited, comp = set(), []
+
+        def dfs(v, c):
+            visited.add(v)
+            c.append(v)
+            for n in G_copy['adj'][v]:
+                if n not in visited:
+                    dfs(n, c)
+
+        for node in G_copy['nodes']:
+            if node not in visited:
+                c = []
+                dfs(node, c)
+                comp.append(c)
+
+        print(f"🔎 Componentes encontradas: {len(comp)}")
+
+        if len(comp) > len(components):
+            components = comp
+        if len(components) >= 2:
+            print("✅ Se detectaron al menos 2 comunidades.")
+            break
+
+        iteracion += 1
+
+    return components
+
+
+# 📊 Mostrar comunidades detectadas con estética de consola
+def mostrar_comunidades(comunidades, top=3):
+    print("\n📦 RESULTADOS DE COMUNIDADES DETECTADAS\n")
+    print(f"🔍 Número total de comunidades: {len(comunidades)}\n")
+
+    for i, c in enumerate(comunidades[:top]):
+        print(f"🌐 Comunidad #{i+1}")
+        print(f"   🔸 Número de nodos: {len(c)}")
+        print(f"   🔸 Miembros principales: {', '.join(map(str, c[:10]))} ...")
+        print("   " + "-"*40)
+
+    if len(comunidades) > top:
+        print(f"\n💡 Nota: Hay más comunidades no mostradas (top {top} mostrado).\n")
+
+
+# Ejecutar Girvan-Newman con estilo
+comunidades = girvan_newman(G_manual)
+
+# Mostrar con buen formato
+mostrar_comunidades(comunidades, top=len(comunidades))
+
+
+
+def graficar_tamaño_comunidades(comunidades):
+    """
+    Muestra el tamaño de cada comunidad en un gráfico de barras.
+    """
+    print("\n📊 Visualizando tamaños de comunidades...")
+
+    tamanios = [len(c) for c in comunidades]
+    plt.figure(figsize=(10, 5))
+    plt.bar(range(1, len(tamanios)+1), tamanios, color='skyblue')
+    plt.title("Tamaño de cada comunidad detectada")
+    plt.xlabel("Índice de comunidad")
+    plt.ylabel("Número de nodos")
+    plt.grid(True, axis='y', linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.show()
+
+
+import matplotlib.pyplot as plt
+import random
+
+def visualizar_comunidades(G, comunidades):
+    """
+    Dibuja una versión simple del grafo con nodos coloreados por comunidad.
+    """
+    print("\n🖼 Dibujando el grafo con comunidades detectadas...")
+
+    plt.figure(figsize=(10, 8))
+    colores = {}
+
+    # Asignar color por comunidad
+    for i, comunidad in enumerate(comunidades):
+        color = (random.random(), random.random(), random.random())
+        for nodo in comunidad:
+            colores[nodo] = color
+
+    # Dibujar nodos
+    for nodo in G['nodes']:
+        x = nodo % 1000
+        y = nodo // 1000
+        plt.scatter(x, y, color=colores.get(nodo, 'gray'), s=10)
+
+    # Dibujar aristas
+    for a, b in G['edges']:
+        x1, y1 = a % 1000, a // 1000
+        x2, y2 = b % 1000, b // 1000
+        plt.plot([x1, x2], [y1, y2], color='gray', alpha=0.1, linewidth=0.5)
+
+    plt.title("Grafo con comunidades detectadas (proyección)")
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+
+graficar_tamaño_comunidades(comunidades)
+visualizar_comunidades(G_manual, comunidades)
+
+from collections import deque
+import matplotlib.pyplot as plt
+
+def camino_mas_corto_promedio_estetico(G, sample_size=100):
+    print("🔍 Iniciando análisis de Caminos Más Cortos Promedio")
+    print(f"📌 Muestra de nodos seleccionados: {sample_size} de {len(G['nodes'])} nodos totales\n")
+
+    total_distancia = 0
+    total_pares = 0
+    max_longitud = 0
+    nodos_max = (None, None)
+    promedios_individuales = []
+
+    for i, start in enumerate(G['nodes'][:sample_size], 1):
+        visited = {start: 0}
+        q = deque([start])
+
+        while q:
+            current = q.popleft()
+            for neighbor in G['adj'][current]:
+                if neighbor not in visited:
+                    visited[neighbor] = visited[current] + 1
+                    q.append(neighbor)
+
+        suma_actual = sum(visited.values())
+        pares_actuales = len(visited) - 1
+
+        if pares_actuales > 0:
+            promedio_actual = suma_actual / pares_actuales
+            promedios_individuales.append(promedio_actual)
+
+            if promedio_actual > max_longitud:
+                max_longitud = promedio_actual
+                nodos_max = (start, max(visited, key=visited.get))
+
+            total_distancia += suma_actual
+            total_pares += pares_actuales
+        else:
+            promedios_individuales.append(0)
+
+    if total_pares > 0:
+        promedio_general = total_distancia / total_pares
+        print("\n📈 RESULTADO FINAL:")
+        print(f"📏 Longitud promedio del camino más corto: {promedio_general:.2f}")
+        print(f"🔝 Par de nodos con camino promedio más largo: {nodos_max[0]} ➡ {nodos_max[1]}")
+        print(f"📏 Longitud máxima promedio detectada: {max_longitud:.2f}")
+    else:
+        print("⚠️ No se pudo calcular caminos: el grafo está muy fragmentado.")
+        return
+
+camino_mas_corto_promedio_estetico(G_manual, sample_size=100)
+
+# 🌲 7. ÁRBOL DE EXPANSIÓN MÍNIMA (Prim - manual sin librerías)
+
+def arbol_expansion_minima_manual(G):
+    print("\n🌐 Iniciando cálculo del Árbol de Expansión Mínima...\n")
+
+    nodos = set(G['nodes'])
+    if not nodos:
+        print("⚠️ El grafo está vacío.")
+        return []
+
+    nodo_inicial = next(iter(nodos))
+    visitados = set([nodo_inicial])
+    aristas_mst = []
+
+    # Lista de tuplas (peso, nodo_origen, nodo_destino) — peso=1 porque es no ponderado
+    frontera = [(1, nodo_inicial, vecino) for vecino in G['adj'][nodo_inicial]]
+
+    while frontera and len(visitados) < len(nodos):
+        frontera.sort()
+        peso, u, v = frontera.pop(0)
+
+        if v in visitados:
+            continue
+
+        aristas_mst.append((u, v))
+        visitados.add(v)
+
+        for vecino in G['adj'][v]:
+            if vecino not in visitados:
+                frontera.append((1, v, vecino))
+
+    print(f"✅ Árbol generado con éxito.")
+    print(f"🔗 Aristas en el árbol mínimo: {len(aristas_mst)}")
+    print(f"📌 Primeras 10 aristas del MST:")
+    for i, (a, b) in enumerate(aristas_mst[:10], 1):
+        print(f"   {i:>2}. {a} ↔ {b}")
+
+    return aristas_mst
+
+
+mst = arbol_expansion_minima_manual(G_manual)
+
+
+# 🗺 8. VISUALIZACIÓN DE UBICACIONES GEOGRÁFICAS
+import matplotlib.pyplot as plt
+
+coords = cargar_ubicaciones(ruta_ubicaciones)
+if coords:
+    plt.figure(figsize=(10, 8))
+    x, y = zip(*coords[:1000])
+    plt.scatter(x, y, s=1, alpha=0.5)
+    plt.title("Distribución Geográfica de Usuarios")
+    plt.xlabel("Longitud")
+    plt.ylabel("Latitud")
+    plt.show()
+
+
+# 🗺 8. VISUALIZACIÓN ESTÉTICA DE UBICACIONES GEOGRÁFICAS
+
+def visualizar_ubicaciones_estetico(coords, muestra=1000):
+    print(f"\n📍 Mostrando ubicación de los primeros {muestra} usuarios geolocalizados...")
+    if not coords:
+        print("⚠️ No hay coordenadas disponibles.")
+        return
+
+    # Extraer coordenadas
+    x, y = zip(*coords[:muestra])
+
+    # Crear figura
+    plt.figure(figsize=(12, 8))
+    plt.scatter(x, y, s=3, alpha=0.6, c=y, cmap='viridis')
+
+    # Detalles del gráfico
+    plt.title("Distribución Geográfica de Usuarios - Muestra de 1000", fontsize=15)
+    plt.xlabel("🌍 Longitud", fontsize=12)
+    plt.ylabel("🌎 Latitud", fontsize=12)
+    plt.grid(True, linestyle='--', linewidth=0.5, alpha=0.3)
+    plt.colorbar(label="Latitud (gradiente de color)")
+    plt.tight_layout()
+    plt.show()
+
+# Usar la función
+visualizar_ubicaciones_estetico(coords, muestra=1000)
+
+
+=================================================AQUI
+
+
+# 4. Estadísticas básicas y gráfico en texto
+def calcular_estadisticas(g):
+    grados = [len(g['adj'][n]) for n in g['nodes']]
+    max_grado = max(grados)
+    min_grado = min(grados)
+    promedio = sum(grados) / len(grados)
+
+    print("📈 Estadísticas del Grafo")
+    print(f"🔹 Nodos: {len(g['nodes'])}")
+    print(f"🔹 Aristas: {len(g['edges'])}")
+    print(f"🔹 Grado promedio: {promedio:.2f}")
+    print(f"🔹 Grado máximo: {max_grado}")
+    print(f"🔹 Grado mínimo: {min_grado}")
+
+    barras = [0] * (max_grado + 1)
+    for g_ in grados:
+        barras[g_] += 1
+
+    print("\n📊 Distribución del grado:")
+    for i, count in enumerate(barras):
+        if count > 0:
+            barra = '█' * min(50, count // 2)
+            print(f"{i:3d} | {barra:<50} ({count})")
+
+calcular_estadisticas(G_manual)
+usuarios_mas_conectados(G_manual, coords, top_n=10)
+
+
+# 5. Top usuarios más conectados y su ubicación
+def usuarios_mas_conectados(g, ubicaciones, top_n=10):
+    grados = {n: len(g['adj'][n]) for n in g['nodes']}
+    top = sorted(grados.items(), key=lambda x: x[1], reverse=True)[:top_n]
+
+    print(f"\n🏆 Top {top_n} Usuarios Más Conectados")
+    for i, (usuario, grado) in enumerate(top):
+        if usuario < len(ubicaciones):  # Validar rango
+            lat, lon = ubicaciones[usuario]
+            print(f"{i+1:2d}. Usuario {usuario} - {grado} conexiones")
+            print(f"    📍 Ubicación: Lat {lat:.2f}, Lon {lon:.2f}")
+        else:
+            print(f"{i+1:2d}. Usuario {usuario} - {grado} conexiones (sin ubicación)")
+
+usuarios_mas_conectados(G_manual, coords, top_n=10)
+
+
+def usuarios_mas_conectados(g, coords, top_n=10):
+    grados = {n: len(g['adj'][n]) for n in g['nodes']}
+    top = sorted(grados.items(), key=lambda x: x[1], reverse=True)[:top_n]
+
+    print(f"\n🏆 Top {top_n} Usuarios Más Conectados")
+    for i, (usuario, grado) in enumerate(top):
+        if usuario < len(coords):
+            lat, lon = coords[usuario]
+            print(f"{i+1:2d}. Usuario {usuario} - {grado} conexiones")
+            print(f"    📍 Ubicación: Lat {lat:.2f}, Lon {lon:.2f}")
+        else:
+            print(f"{i+1:2d}. Usuario {usuario} - {grado} conexiones (sin ubicación)")
+
+
+# 6. Mapa plano
+import matplotlib.pyplot as plt
+
+def mapa_usuarios(coords):
+    x, y = zip(*coords[:1000])  # muestra de 1000
+    plt.figure(figsize=(10, 7))
+    plt.scatter(x, y, s=2, alpha=0.4, color='blue')
+    plt.title("🌍 Mapa de Usuarios (plano)")
+    plt.xlabel("Longitud")
+    plt.ylabel("Latitud")
+    plt.grid(True)
+    plt.show()
+
+mapa_usuarios(coords)
+
+# 7. Globo terráqueo simulado
+def globo_terraqueo(coords):
+    import math
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_facecolor('black')
+    ax.add_artist(plt.Circle((0, 0), 1, fill=False, color='white'))
+
+    muestra = coords[:1000]  # muestra razonable
+
+    for lat, lon in muestra:
+        x = math.cos(math.radians(lat)) * math.cos(math.radians(lon))
+        y = math.cos(math.radians(lat)) * math.sin(math.radians(lon))
+        if x**2 + y**2 <= 1:
+            ax.plot(x, y, 'bo', markersize=1, alpha=0.4)
+
+    ax.set_xlim([-1.1, 1.1])
+    ax.set_ylim([-1.1, 1.1])
+    ax.set_title("🌐 Globo Terráqueo Simulado (2D)", color='white')
+    plt.axis('off')
+    plt.show()
+
+
+import plotly.express as px
+import pandas as pd
+
+# Dataset reducido para rendimiento
+data = pd.DataFrame(coords[::1000], columns=["lat", "lon"])
+
+fig = px.scatter_geo(
+    data,
+    lat="lat",
+    lon="lon",
+    projection="orthographic",  # Globo terráqueo
+    title="🌐 Globo interactivo en tiempo real con ubicaciones de usuarios",
+)
+
+fig.update_geos(
+    showland=True, landcolor="rgb(200, 200, 200)",
+    oceancolor="lightblue", showocean=True,
+    showcountries=True, countrycolor="gray"
+)
+
+fig.update_layout(
+    height=600,
+    margin={"r":0,"t":30,"l":0,"b":0},
+)
+
+fig.show()
+
+
+# 7. Globo terráqueo simulado
+
+def globo_terraqueo(coords):
+    import math
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_facecolor('black')
+    ax.add_artist(plt.Circle((0, 0), 1, fill=False, color='white'))
+
+    muestra = coords[::1000]  # Toma 1 cada 1000 para dispersión
+
+    for lat, lon in muestra:
+        x = math.cos(math.radians(lat)) * math.cos(math.radians(lon))
+        y = math.cos(math.radians(lat)) * math.sin(math.radians(lon))
+        if x**2 + y**2 <= 1:
+            ax.plot(x, y, 'bo', markersize=1, alpha=0.4)
+
+    ax.set_xlim([-1.1, 1.1])
+    ax.set_ylim([-1.1, 1.1])
+    ax.set_title("🌐 Globo Terráqueo Simulado (2D)", color='white')
+    plt.axis('off')
+    plt.show()
+
+
+print(f"Primeras 5 coordenadas:")
+for lat, lon in coords[:5]:
+    print(f"Lat: {lat}, Lon: {lon}")
+
+
+# Visualización de Comunidades detectadas
+def plotly_comunidades(coords, comunidades):
+    import pandas as pd
+    import plotly.express as px
+
+    data = []
+    for i, comunidad in enumerate(comunidades):
+        for nodo in comunidad:
+            if nodo < len(coords):
+                lat, lon = coords[nodo]
+                data.append({'usuario': nodo, 'lat': lat, 'lon': lon, 'comunidad': f"C{i+1}"})
+
+    df = pd.DataFrame(data)
+    fig = px.scatter_geo(df, lat="lat", lon="lon", color="comunidad",
+                         title="🌎 Comunidades Detectadas en la Red (Plotly)",
+                         projection="natural earth")
+
+    fig.update_layout(height=600)
+    fig.show()
+
+
+plotly_comunidades(coords, comunidades)
+
+
+print("🌍 Ubicación y país por usuario:\n")
+
+for i, (lat, lon) in enumerate(coords[:10]):  # Solo primeros 10 para mostrar
+    codigo, nombre = obtener_pais_nombre(lat, lon)
+    print(f"Usuario {i:2d} ➜ {nombre} ({codigo}) - Lat: {lat:.2f}, Lon: {lon:.2f}")
+
+
+## 8. Conclusiones
+
+Este análisis permitió detectar patrones estructurales dentro de una red social real con 200 usuarios y 899 conexiones. Se identificaron comunidades bien definidas, rutas promedio de longitud corta y un árbol de expansión mínima que muestra la conectividad esencial.
+
+### Trabajo Futuro
+
+- Escalar el análisis a los 10 millones de nodos completos.
+- Implementar el algoritmo de Louvain.
+- Aplicar centralidad de Katz o PageRank.
+- Visualizar con herramientas como Gephi para análisis más detallados.
+
+
+#Tabla resumen final de métricas de red
+def resumen_metrico_grafo(G):
+    print("\n📋 RESUMEN DE MÉTRICAS DE RED\n")
+
+    nodos = len(G['nodes'])
+    aristas = len(G['edges'])
+    grados = [len(G['adj'][n]) for n in G['nodes']]
+    grado_prom = sum(grados) / nodos
+    grado_max = max(grados)
+    grado_min = min(grados)
+
+    densidad = (2 * aristas) / (nodos * (nodos - 1)) if nodos > 1 else 0
+
+    # Clustering promedio (solo aproximado por triángulos cerrados)
+    clustering = []
+    for nodo in G['nodes']:
+        vecinos = list(G['adj'][nodo])
+        k = len(vecinos)
+        if k < 2:
+            clustering.append(0)
+            continue
+        enlaces = 0
+        for i in range(k):
+            for j in range(i+1, k):
+                if vecinos[j] in G['adj'][vecinos[i]]:
+                    enlaces += 1
+        clustering.append((2 * enlaces) / (k * (k - 1)))
+
+    clustering_prom = sum(clustering) / nodos
+
+    print(f"{'🔹 Número de nodos':<30}: {nodos}")
+    print(f"{'🔹 Número de aristas':<30}: {aristas}")
+    print(f"{'🔹 Densidad de red':<30}: {densidad:.4f}")
+    print(f"{'🔹 Grado promedio':<30}: {grado_prom:.2f}")
+    print(f"{'🔹 Grado máximo':<30}: {grado_max}")
+    print(f"{'🔹 Grado mínimo':<30}: {grado_min}")
+    print(f"{'🔹 Clustering promedio':<30}: {clustering_prom:.4f}")
+
+resumen_metrico_grafo(G_manual)
+
+
+# Comparar Girvan-Newman con Louvain
+!pip install networkx python-louvain
+import networkx as nx
+import community.community_louvain as community_louvain
+
+
+def comparar_gn_louvain(G, comunidades_gn):
+    print("\n🧪 Comparación: Girvan-Newman vs Louvain")
+
+    Gnx = nx.Graph()
+    for u in G['nodes']:
+        for v in G['adj'][u]:
+            Gnx.add_edge(u, v)
+
+    partition = community_louvain.best_partition(Gnx)
+    louvain_comunidades = {}
+    for nodo, grupo in partition.items():
+        louvain_comunidades.setdefault(grupo, []).append(nodo)
+
+    print(f"🔍 Louvain detectó {len(louvain_comunidades)} comunidades")
+    print(f"🔍 Girvan-Newman detectó {len(comunidades_gn)} comunidades")
+
+    print("\n📦 Tamaños (top 3 Louvain):")
+    for i, c in enumerate(sorted(louvain_comunidades.values(), key=len, reverse=True)[:3]):
+        print(f"  Comunidad {i+1} → {len(c)} nodos")
+
+    return louvain_comunidades
+
+
+# Ejecutar la comparación
+comunidades_louvain = comparar_gn_louvain(G_manual, comunidades)
+
+
